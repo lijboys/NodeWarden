@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Link, Route, Switch, useLocation } from 'wouter';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowUpDown, Cloud, Lock, LogOut, Send as SendIcon, Settings as SettingsIcon, Shield, ShieldUser, Vault } from 'lucide-preact';
@@ -18,6 +18,8 @@ import ImportPage from '@/components/ImportPage';
 import {
   changeMasterPassword,
   createFolder,
+  updateFolder,
+  deleteFolder,
   createCipher,
   createAuthedFetch,
   createInvite,
@@ -74,6 +76,10 @@ const SEND_KEY_SALT = 'bitwarden-send';
 const SEND_KEY_PURPOSE = 'send';
 const IMPORT_ROUTE = '/help/import-export';
 const IMPORT_ROUTE_ALIASES = new Set(['/tools/import', '/tools/import-export', '/tools/import-data', '/import', '/import-export']);
+
+function looksLikeCipherString(value: string): boolean {
+  return /^\d+\.[A-Za-z0-9+/=]+\|[A-Za-z0-9+/=]+(?:\|[A-Za-z0-9+/=]+)?$/.test(String(value || '').trim());
+}
 
 function asText(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -252,6 +258,7 @@ export default function App() {
   const [decryptedFolders, setDecryptedFolders] = useState<Folder[]>([]);
   const [decryptedCiphers, setDecryptedCiphers] = useState<Cipher[]>([]);
   const [decryptedSends, setDecryptedSends] = useState<Send[]>([]);
+  const migratedPlainFolderIdsRef = useRef<Set<string>>(new Set());
 
   function setSession(next: SessionState | null) {
     setSessionState(next);
@@ -714,6 +721,31 @@ export default function App() {
     };
   }, [session?.symEncKey, session?.symMacKey, foldersQuery.data, ciphersQuery.data, sendsQuery.data]);
 
+  useEffect(() => {
+    if (!session?.symEncKey || !session?.symMacKey || !foldersQuery.data?.length) return;
+    let cancelled = false;
+    (async () => {
+      const pending = foldersQuery.data.filter((folder) => {
+        if (!folder?.id || !folder?.name) return false;
+        if (migratedPlainFolderIdsRef.current.has(folder.id)) return false;
+        return !looksLikeCipherString(String(folder.name));
+      });
+      if (!pending.length) return;
+      for (const folder of pending) {
+        try {
+          await updateFolder(authedFetch, session, folder.id, String(folder.name));
+          migratedPlainFolderIdsRef.current.add(folder.id);
+        } catch {
+          // keep silent; web still supports plaintext fallback display
+        }
+      }
+      if (!cancelled) await foldersQuery.refetch();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.symEncKey, session?.symMacKey, foldersQuery.data, authedFetch]);
+
   async function changePasswordAction(currentPassword: string, nextPassword: string, nextPassword2: string) {
     if (!profile) return;
     if (!currentPassword || !nextPassword) {
@@ -943,11 +975,28 @@ export default function App() {
       return;
     }
     try {
-      await createFolder(authedFetch, folderName);
+      if (!session) throw new Error('Vault key unavailable');
+      await createFolder(authedFetch, session, folderName);
       await foldersQuery.refetch();
       pushToast('success', t('txt_folder_created'));
     } catch (error) {
       pushToast('error', error instanceof Error ? error.message : t('txt_create_folder_failed'));
+      throw error;
+    }
+  }
+
+  async function deleteFolderAction(folderId: string) {
+    const id = String(folderId || '').trim();
+    if (!id) {
+      pushToast('error', 'Folder not found');
+      return;
+    }
+    try {
+      await deleteFolder(authedFetch, id);
+      await Promise.all([ciphersQuery.refetch(), foldersQuery.refetch()]);
+      pushToast('success', 'Folder deleted');
+    } catch (error) {
+      pushToast('error', error instanceof Error ? error.message : 'Delete folder failed');
       throw error;
     }
   }
@@ -972,7 +1021,7 @@ export default function App() {
         if (!name) continue;
         let folderId = createdFolderIdByName.get(name) || null;
         if (!folderId) {
-          const created = await createFolder(authedFetch, name);
+          const created = await createFolder(authedFetch, session, name);
           folderId = created.id;
           createdFolderIdByName.set(name, folderId);
         }
@@ -1261,6 +1310,7 @@ export default function App() {
                     onVerifyMasterPassword={verifyMasterPasswordAction}
                     onNotify={pushToast}
                     onCreateFolder={createFolderAction}
+                    onDeleteFolder={deleteFolderAction}
                   />
                 </Route>
                 <Route path="/settings">

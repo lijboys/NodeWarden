@@ -44,6 +44,7 @@ interface VaultPageProps {
   onVerifyMasterPassword: (email: string, password: string) => Promise<void>;
   onNotify: (type: 'success' | 'error', text: string) => void;
   onCreateFolder: (name: string) => Promise<void>;
+  onDeleteFolder: (folderId: string) => Promise<void>;
 }
 
 type TypeFilter = 'login' | 'card' | 'identity' | 'note' | 'ssh';
@@ -339,6 +340,7 @@ export default function VaultPage(props: VaultPageProps) {
   const [moveFolderId, setMoveFolderId] = useState('__none__');
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [pendingDeleteFolder, setPendingDeleteFolder] = useState<Folder | null>(null);
   const [totpLive, setTotpLive] = useState<{ code: string; remain: number } | null>(null);
   const [hiddenFieldVisibleMap, setHiddenFieldVisibleMap] = useState<Record<number, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -686,6 +688,20 @@ function folderName(id: string | null | undefined): string {
     }
   }
 
+  async function confirmDeleteFolder(): Promise<void> {
+    if (!pendingDeleteFolder) return;
+    setBusy(true);
+    try {
+      await props.onDeleteFolder(pendingDeleteFolder.id);
+      if (sidebarFilter.kind === 'folder' && sidebarFilter.folderId === pendingDeleteFolder.id) {
+        setSidebarFilter({ kind: 'all' });
+      }
+      setPendingDeleteFolder(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <div className="vault-grid">
@@ -732,17 +748,32 @@ function folderName(id: string | null | undefined): string {
               <FolderX size={14} className="tree-icon" /> <span className="tree-label">{t('txt_no_folder')}</span>
             </button>
             {props.folders.map((folder) => (
-              <button
-                key={folder.id}
-                type="button"
-                className={`tree-btn ${sidebarFilter.kind === 'folder' && sidebarFilter.folderId === folder.id ? 'active' : ''}`}
-                onClick={() => setSidebarFilter({ kind: 'folder', folderId: folder.id })}
-              >
-                <FolderIcon size={14} className="tree-icon" />
-                <span className="tree-label" title={folder.decName || folder.name || folder.id}>
-                  {folder.decName || folder.name || folder.id}
-                </span>
-              </button>
+              <div key={folder.id} className="folder-row">
+                <button
+                  type="button"
+                  className={`tree-btn ${sidebarFilter.kind === 'folder' && sidebarFilter.folderId === folder.id ? 'active' : ''}`}
+                  onClick={() => setSidebarFilter({ kind: 'folder', folderId: folder.id })}
+                >
+                  <FolderIcon size={14} className="tree-icon" />
+                  <span className="tree-label" title={folder.decName || folder.name || folder.id}>
+                    {folder.decName || folder.name || folder.id}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="folder-delete-btn"
+                  title={t('txt_delete')}
+                  aria-label={t('txt_delete')}
+                  disabled={busy}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPendingDeleteFolder(folder);
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
             ))}
           </div>
         </aside>
@@ -1468,6 +1499,17 @@ function folderName(id: string | null | undefined): string {
           <input className="input" value={newFolderName} onInput={(e) => setNewFolderName((e.currentTarget as HTMLInputElement).value)} />
         </label>
       </ConfirmDialog>
+
+      <ConfirmDialog
+        open={!!pendingDeleteFolder}
+        title={`${t('txt_delete')} ${t('txt_folder')}`}
+        message={`Delete folder "${pendingDeleteFolder?.decName || pendingDeleteFolder?.name || pendingDeleteFolder?.id || ''}"? Items inside will move to ${t('txt_no_folder')}.`}
+        confirmText={t('txt_delete')}
+        cancelText={t('txt_cancel')}
+        danger
+        onConfirm={() => void confirmDeleteFolder()}
+        onCancel={() => setPendingDeleteFolder(null)}
+      />
 
       <ConfirmDialog
         open={repromptOpen}

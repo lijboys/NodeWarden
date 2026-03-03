@@ -622,6 +622,36 @@ input[type='file'].input::file-selector-button:hover {
   text-overflow: ellipsis;
 }
 
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.folder-row .tree-btn {
+  margin-bottom: 0;
+}
+
+.folder-delete-btn {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.folder-delete-btn:hover {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
 .list-col {
   display: flex;
   flex-direction: column;

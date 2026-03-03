@@ -306,17 +306,54 @@ export async function getFolders(authedFetch: (input: string, init?: RequestInit
 
 export async function createFolder(
   authedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  session: SessionState,
   name: string
 ): Promise<{ id: string; name?: string | null }> {
+  if (!session.symEncKey || !session.symMacKey) throw new Error('Vault key unavailable');
+  const enc = base64ToBytes(session.symEncKey);
+  const mac = base64ToBytes(session.symMacKey);
+  const encryptedName = await encryptBw(new TextEncoder().encode(name), enc, mac);
   const resp = await authedFetch('/api/folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name: encryptedName }),
   });
   if (!resp.ok) throw new Error('Create folder failed');
   const body = await parseJson<{ id?: string; name?: string | null }>(resp);
   if (!body?.id) throw new Error('Create folder failed');
   return { id: body.id, name: body.name ?? null };
+}
+
+export async function deleteFolder(
+  authedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  folderId: string
+): Promise<void> {
+  const id = String(folderId || '').trim();
+  if (!id) throw new Error('Folder id is required');
+  const resp = await authedFetch(`/api/folders/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!resp.ok) throw new Error('Delete folder failed');
+}
+
+export async function updateFolder(
+  authedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  session: SessionState,
+  folderId: string,
+  name: string
+): Promise<void> {
+  const id = String(folderId || '').trim();
+  if (!id) throw new Error('Folder id is required');
+  if (!session.symEncKey || !session.symMacKey) throw new Error('Vault key unavailable');
+  const enc = base64ToBytes(session.symEncKey);
+  const mac = base64ToBytes(session.symMacKey);
+  const encryptedName = await encryptBw(new TextEncoder().encode(name), enc, mac);
+  const resp = await authedFetch(`/api/folders/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: encryptedName }),
+  });
+  if (!resp.ok) throw new Error('Update folder failed');
 }
 
 export async function getCiphers(authedFetch: (input: string, init?: RequestInit) => Promise<Response>): Promise<Cipher[]> {
